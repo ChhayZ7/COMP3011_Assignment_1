@@ -3,6 +3,20 @@ package comp3011.assignment1.error;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+ 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+ 
+import comp3011.assignment1.model.ErrorResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +44,30 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ShutdownInProgressException.class)
     public ResponseEntity<ErrorResponse> handleShutdownInProgress(ShutdownInProgressException ex, HttpServletRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+    
+    // The client sent no audio, or nothing usable. Retrying unchanged will not help.
+    @ExceptionHandler(InvalidAudioUploadException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidUpload(InvalidAudioUploadException ex, HttpServletRequest request){
+    		return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+    }
+    
+    // The multipart form field is missing entirely, so the request never reaches the controller.
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException ex, HttpServletRequest request){
+    		return build(HttpStatus.BAD_REQUEST, "Required multipart form field '" + ex.getParameterName() + "' is missing.", request);
+    }
+    
+    /**
+     * The upload exceeded spring.servlet.multipart.max-file-size.
+     *
+     * Without this handler the client receives an opaque 500, which is misleading: the server
+     * is fine, the request was too large. The limit is a deliberate defence against a single
+     * client exhausting heap, so the rejection should say so plainly.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex, HttpServletRequest request){
+    		return build(HttpStatus.PAYLOAD_TOO_LARGE, "The uploaded audio exceeds the maximum permitted size.", request);
     }
 
     // Upstream STT failures surface to the client as 500 with a generic message.
