@@ -3,20 +3,6 @@ package comp3011.assignment1.error;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
- 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MissingServletRequestParameterException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.multipart.MaxUploadSizeExceededException;
- 
-import comp3011.assignment1.model.ErrorResponse;
-import jakarta.servlet.http.HttpServletRequest;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import comp3011.assignment1.model.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,31 +21,43 @@ import jakarta.servlet.http.HttpServletRequest;
  * specification.
  *
  * Handling errors in one advice rather than per controller keeps controllers free of
- * try/catch noise and guarantees that every failure path emits the same JSON contract.
+ * try/catch noise and guarantees every failure path emits the same JSON contract.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    // A second shutdown request while one is already running is a conflict, not an error.
+    //A second shutdown request while one is already running is a conflict, not an error.
     @ExceptionHandler(ShutdownInProgressException.class)
-    public ResponseEntity<ErrorResponse> handleShutdownInProgress(ShutdownInProgressException ex, HttpServletRequest request) {
+    public ResponseEntity<ErrorResponse> handleShutdownInProgress(
+            ShutdownInProgressException ex, HttpServletRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
     }
-    
-    // The client sent no audio, or nothing usable. Retrying unchanged will not help.
+
+    //The client sent no audio, or nothing usable. Retrying unchanged will not help.
     @ExceptionHandler(InvalidAudioUploadException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidUpload(InvalidAudioUploadException ex, HttpServletRequest request){
-    		return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+    public ResponseEntity<ErrorResponse> handleInvalidUpload(
+            InvalidAudioUploadException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
     }
-    
-    // The multipart form field is missing entirely, so the request never reaches the controller.
-    @ExceptionHandler(MissingServletRequestParameterException.class)
-    public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException ex, HttpServletRequest request){
-    		return build(HttpStatus.BAD_REQUEST, "Required multipart form field '" + ex.getParameterName() + "' is missing.", request);
+
+    /**
+     * The multipart form field is missing entirely, so the request never reaches the controller.
+     *
+     * This is distinct from {@code MissingServletRequestParameterException}, which applies to
+     * ordinary request parameters. A {@code MultipartFile} argument declared with
+     * {@code @RequestParam} is resolved by Spring's multipart machinery, which raises this
+     * exception type instead when the named part is absent.
+     */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ErrorResponse> handleMissingPart(
+            MissingServletRequestPartException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST,
+                "Required multipart field '" + ex.getRequestPartName() + "' is missing.",
+                request);
     }
-    
+
     /**
      * The upload exceeded spring.servlet.multipart.max-file-size.
      *
@@ -66,13 +66,16 @@ public class GlobalExceptionHandler {
      * client exhausting heap, so the rejection should say so plainly.
      */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<ErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex, HttpServletRequest request){
-    		return build(HttpStatus.PAYLOAD_TOO_LARGE, "The uploaded audio exceeds the maximum permitted size.", request);
+    public ResponseEntity<ErrorResponse> handleUploadTooLarge(
+            MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        return build(HttpStatus.PAYLOAD_TOO_LARGE,
+                "The uploaded audio exceeds the maximum permitted size.", request);
     }
 
-    // Upstream STT failures surface to the client as 500 with a generic message.
+    /** Upstream STT failures surface to the client as 500 with a generic message. */
     @ExceptionHandler(TranscriptionException.class)
-    public ResponseEntity<ErrorResponse> handleTranscriptionFailure(TranscriptionException ex, HttpServletRequest request) {
+    public ResponseEntity<ErrorResponse> handleTranscriptionFailure(
+            TranscriptionException ex, HttpServletRequest request) {
         log.error("Transcription failed for {}: {}", request.getRequestURI(), ex.getMessage());
         return build(HttpStatus.INTERNAL_SERVER_ERROR,
                 "The speech-to-text service could not process the request.", request);
@@ -93,7 +96,8 @@ public class GlobalExceptionHandler {
                 "An unexpected server error occurred.", request);
     }
 
-    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, HttpServletRequest request) {
+    private ResponseEntity<ErrorResponse> build(
+            HttpStatus status, String message, HttpServletRequest request) {
         ErrorResponse body = new ErrorResponse(
                 DateTimeFormatter.ISO_INSTANT.format(Instant.now().truncatedTo(ChronoUnit.SECONDS)),
                 status.value(),
