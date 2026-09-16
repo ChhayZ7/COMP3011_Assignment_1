@@ -8,9 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import comp3011.assignment1.model.ErrorResponse;
@@ -56,6 +58,23 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST,
                 "Required multipart field '" + ex.getRequestPartName() + "' is missing.",
                 request);
+    }
+
+    /**
+     * The request was never a valid multipart/form-data request in the first place — a wrong or
+     * missing Content-Type header, or no body at all.
+     *
+     * Two distinct exception types land here because Spring can reject a mismatched request at
+     * two different points: {@code HttpMediaTypeNotSupportedException} when the Content-Type
+     * header doesn't match what the endpoint declares in {@code consumes}, or
+     * {@code MultipartException} when content negotiation passes but the multipart parser itself
+     * finds no genuine multipart body to parse. Both represent the same client mistake from this
+     * application's point of view, so both produce the same response.
+     */
+    @ExceptionHandler({MultipartException.class, HttpMediaTypeNotSupportedException.class})
+    public ResponseEntity<ErrorResponse> handleNotMultipart(Exception ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST,
+                "Expected a multipart/form-data request with a 'file' field.", request);
     }
 
     /**
